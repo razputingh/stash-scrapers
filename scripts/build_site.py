@@ -109,7 +109,7 @@ def last_commit(root: Path, directory: Path) -> tuple[str, str]:
             "git",
             "log",
             "-1",
-            "--format=%h-%as%n%ai",
+            "--format=%h%n%ai",
             "--",
             str(directory.relative_to(root)),
         ],

@@ -75,7 +75,7 @@ def test_packages_index_and_reproducibility(tree):
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert scraper["version"] == f"{sha}-2026-10-30"
+    assert scraper["version"] == sha
     for entry in entries:
         assert entry["path"] == f"{entry['id']}.zip"
         assert (

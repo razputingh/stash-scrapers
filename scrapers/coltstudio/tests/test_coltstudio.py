@@ -316,6 +316,76 @@ class SceneTests(unittest.TestCase):
 
 
 class GroupTests(unittest.TestCase):
+    def test_best_of_colt_synopsis_excludes_specs_and_shipping(self):
+        doc = group_page(
+            title="Best of Colt Films 5 & 6",
+            description="""<table><tr><td>Compilation synopsis.<br><br>
+            A second paragraph.<br><br>
+            - Directed by Rip Colt<br>
+            - TRT of 220 mins on one disc<br>
+            - Region Free, Photo Galleries and Previews
+            <p>**Please note this DVD ships in our White Label DVD Wallet packaging.</p>
+            </td></tr>
+            <tr><td><a href="https://www.coltstudiogroup.com/scene/1-test">Watch scene</a>
+            <p>Scene advertising, not the synopsis.</p></td></tr></table>""",
+        )
+        result = colt.parse_group(doc, GROUP_URL)
+        self.assertEqual(
+            result["synopsis"],
+            "Compilation synopsis.\n\nA second paragraph.\n\nDVD SKU: MAN-001D",
+        )
+        self.assertEqual(result["director"], "Rip Colt")
+        self.assertEqual(result["duration"], "13200")
+
+    def test_description_without_spec_bullets_is_unchanged(self):
+        description = """<p>A complete synopsis.</p><p>Second paragraph.</p>
+        <p>- An unusual narrative line.</p><p>A preview of the story.</p>"""
+        result = colt.parse_group(group_page(description=description), GROUP_URL)
+        self.assertEqual(
+            result["synopsis"],
+            "A complete synopsis.\n\nSecond paragraph.\n\n"
+            "- An unusual narrative line.\n\nA preview of the story.\n\nDVD SKU: MAN-001D",
+        )
+
+    def test_narrative_lines_mentioning_spec_words_are_kept(self):
+        description = """<p>Synopsis.</p><p>- Director's cut with extra scenes</p>
+        <p>- Previews of upcoming titles</p>
+        <p>The story ships in a crate to the packaging plant.</p>"""
+        result = colt.parse_group(group_page(description=description), GROUP_URL)
+        self.assertEqual(
+            result["synopsis"],
+            "Synopsis.\n\n- Director's cut with extra scenes\n\n"
+            "- Previews of upcoming titles\n\n"
+            "The story ships in a crate to the packaging plant.\n\nDVD SKU: MAN-001D",
+        )
+
+    def test_spec_only_description_keeps_multiple_skus(self):
+        for marker in ("-", "•", "●", "◦"):
+            with self.subTest(marker=marker):
+                doc = group_page(
+                    description=f"""<p>{marker} Directed by Rip Colt<br>
+                    {marker} TRT of 220 mins on one disc<br>
+                    {marker} Region Free<br>{marker} Photo Galleries<br>
+                    {marker} Previews</p>""",
+                    variants=[{"sku": "A"}, {"sku": "B"}],
+                )
+                result = colt.parse_group(doc, GROUP_URL)
+                self.assertEqual(result["synopsis"], "DVD SKU: A, B")
+                self.assertEqual(result["director"], "Rip Colt")
+                self.assertEqual(result["duration"], "13200")
+
+    def test_shipping_note_variants_are_removed(self):
+        for note in (
+            "**Please note the DVD uses wallet packaging.",
+            "This DVD ships in our White Label packaging.",
+        ):
+            with self.subTest(note=note):
+                result = colt.parse_group(
+                    group_page(description=f"<p>Synopsis.</p><p>{note}</p>"),
+                    GROUP_URL,
+                )
+                self.assertEqual(result["synopsis"], "Synopsis.\n\nDVD SKU: MAN-001D")
+
     def test_description_label_lines_are_extracted_once(self):
         doc = group_page(
             description="""<p>Brand: Olympus</p>

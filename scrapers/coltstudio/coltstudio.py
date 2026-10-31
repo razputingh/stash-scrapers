@@ -319,15 +319,6 @@ def parse_group(doc, url):
     )
     result = {"name": clean(product["title"]), "urls": [url], "studio": studio(name)}
     synopsis = paragraphs([description])
-    skus = unique(
-        clean(v.get("sku", ""))
-        for v in product.get("variants", [])
-        if isinstance(v, dict)
-    )
-    if skus:
-        synopsis += "\n\nDVD SKU: " + ", ".join(skus)
-    if synopsis:
-        result["synopsis"] = synopsis.strip()
     director = re.search(
         r"(?:Directed by|Director\s*:)\s*([^\n]+)", synopsis, re.IGNORECASE
     )
@@ -340,6 +331,28 @@ def parse_group(doc, url):
     )
     if runtime:
         result["duration"] = str(int(runtime[1]) * 60)
+    # Read credits first; only known spec bullets and shipping notes leave the synopsis.
+    synopsis = "\n\n".join(
+        line
+        for line in synopsis.splitlines()
+        if line
+        and not re.search(
+            r"^[-•●◦]\s*(?:Directed by\b|Director\s*:|TRT\b|Run(?:ning)?\s*Time\b|"
+            r"Duration\b|Region Free\b|Photo Galleries\b|Previews\s*$)"
+            r"|^\*\*Please note\b|^(?:This|The) DVD ships in\b.*\bpackaging\b",
+            line,
+            re.IGNORECASE,
+        )
+    )
+    skus = unique(
+        clean(v.get("sku", ""))
+        for v in product.get("variants", [])
+        if isinstance(v, dict)
+    )
+    if skus:
+        synopsis += "\n\nDVD SKU: " + ", ".join(skus)
+    if synopsis:
+        result["synopsis"] = synopsis.strip()
     date = explicit_date(labeled_value(lines, "Release Date|Released|Date"))
     if date:
         result["date"] = date

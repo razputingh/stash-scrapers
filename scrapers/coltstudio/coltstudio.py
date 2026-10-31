@@ -27,6 +27,7 @@ from lxml import etree, html
 
 SITE = "https://www.coltstudiogroup.com"
 STORE = "https://coltstudiostore.com"
+STORE_KINDS = {"group", "movie"}
 PAGE_HOSTS = {
     "www.coltstudiogroup.com",
     "coltstudiogroup.com",
@@ -98,7 +99,7 @@ def page_url(url, kind=None):
         prefix = "scene" if kind == "scene" else "profile"
         if host != SITE or not re.fullmatch(rf"/{prefix}/\d+(?:-[^/]+)?", path):
             raise ValueError(f"Expected a Colt {prefix} URL")
-    if kind == "group":
+    if kind in STORE_KINDS:
         match = re.fullmatch(r"/products/[^/]+", path)
         if host != STORE or not match:
             raise ValueError("Expected a Colt Store DVD product URL")
@@ -128,7 +129,7 @@ def canonical(doc, url, kind):
     )
     original = page_url(url, kind)
     # A redirect to a different entity must not silently scrape the wrong item.
-    if kind == "group":
+    if kind in STORE_KINDS:
         same = result == original
     else:
         same = (
@@ -304,6 +305,25 @@ def artwork_url(value, base):
 
 
 def parse_group(doc, url):
+    result, _ = _parse_group(doc, url)
+    return result
+
+
+def scene_links(description, url):
+    links = {}
+    for href in description.xpath(".//a[@href]/@href"):
+        try:
+            link = page_url(urljoin(url, href), "scene")
+        except ValueError:
+            continue
+        # Store promotions repeat scene IDs with malformed or alternate slugs.
+        scene_id = re.search(r"/scene/(\d+)", link)[1]
+        links.setdefault(scene_id, link)
+    return list(links.values())
+
+
+def _parse_group(doc, url, *, scene_urls=None):
+    # An optional collector keeps scene links private without parsing the product twice.
     url = canonical(doc, url, "group")
     product = product_data(doc)
     if product.get("handle") != url.rsplit("/", 1)[-1]:
@@ -313,6 +333,8 @@ def parse_group(doc, url):
     description = html.fromstring(
         "<div>" + (product.get("description") or "") + "</div>"
     )
+    if scene_urls is not None:
+        scene_urls.extend(scene_links(description, url))
     # Remove scene promotion rows, but preserve the DVD's own table-cell text.
     for row in description.xpath(
         ".//tr[.//a[contains(@href,'/scene/')] and not(.//tr)]"
@@ -411,7 +433,7 @@ def parse_group(doc, url):
         )
         if fallback:
             result["front_image"] = fallback
-    return result
+    return result, skus
 
 
 def parse_performer(doc, url):
@@ -492,11 +514,45 @@ def performer_details(entry, fetch):
     return result
 
 
+def movie_scene(doc, url, fetch):
+    links = []
+    group, skus = _parse_group(doc, url, scene_urls=links)
+    result = {"title": group["name"], "urls": group["urls"], "groups": [group]}
+    for key in ("studio", "director", "date", "tags"):
+        if key in group:
+            result[key] = group[key]
+    result["details"] = "\n\n".join(
+        line
+        for line in group.get("synopsis", "").splitlines()
+        if line and not line.startswith("DVD SKU:")
+    )
+    if skus:
+        result["code"] = ", ".join(skus)
+    if "front_image" in group:
+        result["image"] = group["front_image"]
+    performers = {}
+    for link in links:
+        try:
+            scene = parse_scene(fetch(link), link)
+        except FETCH_ERRORS as error:
+            print(f"[Warning] Scene lookup failed for {link}: {error}", file=sys.stderr)
+            continue
+        for entry in scene["performers"]:
+            profile_id = re.search(r"/profile/(\d+)", entry["urls"][0])[1]
+            performers.setdefault(profile_id, entry)
+    result["performers"] = [
+        performer_details(entry, fetch) for entry in performers.values()
+    ]
+    return result
+
+
 def scrape(kind, url, fetch=fetch_page):
     url = page_url(url, kind)
     doc = fetch(url)
     if kind == "group":
         return parse_group(doc, url)
+    if kind == "movie":
+        return movie_scene(doc, url, fetch)
     if kind == "performer":
         return parse_performer(doc, url)
     result, explicit_studio = _parse_scene(doc, url)
@@ -520,9 +576,14 @@ def scrape(kind, url, fetch=fetch_page):
 
 def main():
     try:
-        if len(sys.argv) != 2 or sys.argv[1] not in {"scene", "group", "performer"}:
+        if len(sys.argv) != 2 or sys.argv[1] not in {
+            "scene",
+            "group",
+            "movie",
+            "performer",
+        }:
             raise ValueError(
-                "Expected scene, group, or performer mode and JSON input on stdin"
+                "Expected scene, group, movie, or performer mode and JSON input on stdin"
             )
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict) or not isinstance(payload.get("url"), str):

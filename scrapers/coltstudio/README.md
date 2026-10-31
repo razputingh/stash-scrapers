@@ -30,7 +30,8 @@ A community scraper update can restore those entries. Do not disable AdultSiteRu
 
 ## Supported URLs
 
-Use a scene URL in the scene editor, a DVD URL in the group editor, or a profile URL in the performer editor.
+Use a scene URL in the scene editor, a DVD product URL in the scene or group editor, or a profile URL in the performer editor.
+In the scene editor, a DVD URL returns the whole film as one scene and includes its DVD group.
 The scraper accepts HTTP and HTTPS, with or without `www`, and normalizes its output to HTTPS.
 Only `coltstudiostore.com/products/` URLs work.
 Collection-path URLs such as `/collections/dvd/products/title` do not. Remove the `/collections/dvd` part of the address.
@@ -73,6 +74,21 @@ It does not assume that the second product image is a back cover. Store images o
 Product content tags are retained, but brand, DVD, sale, inventory, and merchandising labels are excluded.
 Explicit categories or tags in the DVD description are also retained.
 
+Whole-film scene results use the DVD title, studio, director, explicit release date, tags, and front cover.
+The DVD SKU becomes the scene code. Multiple distinct SKUs are joined with commas.
+The scene description excludes the `DVD SKU:` line, but the related group's synopsis keeps it.
+The scene result does not set a duration because Stash's scraped-scene format has no duration field.
+The related group keeps the DVD runtime.
+
+For whole films, the scraper collects performers from the scene pages linked in the DVD description.
+It does not infer names from the “Featuring...” prose.
+It makes one extra request per distinct linked scene, then one per distinct performer profile across those scenes.
+These requests run one at a time. Credits keep their first-seen order, with duplicates removed by numeric profile ID.
+Alternate scene slugs, including malformed store links, are de-duplicated by numeric scene ID before requests.
+Failed scene requests log a warning and do not discard the film or later scenes.
+Failed profile requests keep the name and profile URL. A DVD without scene links returns an empty performer list.
+The DVD product is fetched and parsed only once for both the whole-film scene and its related group.
+
 Performer results include the name, profile URL, male gender, image, biography, profile tags, and social links when available.
 Height, weight, and penis length use centimeters, kilograms, and centimeters respectively.
 Circumcision status and position tags are retained when listed.
@@ -89,7 +105,8 @@ Titles and narrative descriptions do not determine the studio.
 
 The scraper accepts full dates only. It does not turn a release year into January 1.
 Shopify `created_at` and `published_at` describe store records, not film releases, and are never used as release dates.
-A DVD release date does not become a scene release date.
+A DVD release date does not become an individual scene's release date.
+Whole-film scenes use the DVD's explicit full release date when available.
 
 Stash v0.31.1 has no scene-index field in its scraped-group format.
 Group results therefore do not set scene order, even when a scene title includes a number.
@@ -111,6 +128,12 @@ echo '{"url":"https://www.coltstudiogroup.com/scene/395-colt-man-seth-fornea-red
 ```
 
 Replace `scene` with `group` or `performer` for the other URL types.
+Use `movie` with a DVD product URL to scrape a whole-film scene:
+
+```sh
+echo '{"url":"https://coltstudiostore.com/products/fresh-off-the-vine"}' | uv run coltstudio.py movie
+```
+
 The helper writes one JSON value to standard output and warnings/errors to standard error.
 On a failed primary scrape, it returns JSON `null` and exits with status 1.
 Tests use synthetic HTML fixtures based on the public page structure. They make no network requests.
@@ -122,6 +145,12 @@ The performer check returned 183 cm, 90 kg, 21.59 cm penis length, `CUT`, and a 
 Tests also cover labels with colons and extra spaces.
 Unrecognized performer labels produce warnings on standard error, including the live profile's unsupported `Age` and `Sign` fields.
 Local results contain image URLs. Stash downloads the images during scrape post-processing.
+
+A live whole-film check on October 31, 2026 returned Fresh Off The Vine with code `BSP-020D` and studio Buckshot.
+Its group retained the 113-minute runtime. The scene had no duration and no SKU line in its description.
+All four linked scenes, including the malformed links, resolved to their expected scene IDs.
+The combined credits included eight distinct performers, with Devon Hunter and Topher DiMaggio from Scene 2.
+These are suggestions for review, not automatic changes to existing Stash credits.
 
 ## References
 

@@ -552,6 +552,239 @@ def scene_profile_pages(dvd=False, extras=""):
     return pages
 
 
+def test_movie_core_fields_reuse_one_product_parse_and_group():
+    doc = group_page(
+        description="""<p>DVD synopsis.</p><p>- Directed by Jane Director<br>
+        - TRT of 41 mins</p><p>Release Date: 2004-05-06</p>""",
+        variants=[{"sku": "MAN-001D"}, {"sku": "MAN-002D"}, {"sku": "MAN-001D"}],
+    )
+    with (
+        patch.object(colt, "product_data", wraps=colt.product_data) as parse,
+        patch("builtins.print") as output,
+    ):
+        result = colt.scrape("movie", GROUP_URL, lambda url: doc)
+    parse.assert_called_once_with(doc)
+    output.assert_not_called()
+    group = colt.parse_group(doc, GROUP_URL)
+    assert result == {
+        "title": "Red Hot",
+        "urls": [GROUP_URL],
+        "groups": [group],
+        "studio": group["studio"],
+        "director": "Jane Director",
+        "date": "2004-05-06",
+        "tags": [{"name": "Muscle"}, {"name": "Vintage"}],
+        "details": "DVD synopsis.\n\nRelease Date: 2004-05-06",
+        "code": "MAN-001D, MAN-002D",
+        "image": group["front_image"],
+        "performers": [],
+    }
+    assert group["synopsis"].endswith("DVD SKU: MAN-001D, MAN-002D")
+    assert group["duration"] == "2460"
+    assert "duration" not in result
+
+
+def test_movie_without_optional_fields_or_scene_links_needs_one_request():
+    doc = group_page(
+        description="<p>Featuring Someone Famous.</p>",
+        variants=[],
+        tags=[],
+        images=[],
+    )
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return doc
+
+    result = colt.scrape("movie", GROUP_URL, fetch)
+    assert calls == [GROUP_URL]
+    assert result["performers"] == []
+    assert result["details"] == "Featuring Someone Famous."
+    for key in ("code", "date", "image", "tags", "director", "duration"):
+        assert key not in result
+
+
+def movie_pages():
+    pages = scene_profile_pages(dvd=True)
+    second_url = colt.SITE + "/scene/396-red-hot-scene-2"
+    second = scene_page(performers=False)
+    second.xpath('//link[@rel="canonical"]')[0].set("href", second_url)
+    second.xpath(colt.DETAILS)[0].append(
+        html.fromstring("""<div>
+        <span class="perfImage"><a href="/profile/334-other-slug">Seth Alias</a></span>
+        <span class="perfImage"><a href="/profile/999-new-credit">New Credit</a></span>
+        </div>""")
+    )
+    pages[second_url] = second
+    pages[colt.SITE + "/profile/999-new-credit"] = profile_page(
+        url=colt.SITE + "/profile/999-new-credit", name="Different Profile Name"
+    )
+    pages[GROUP_URL] = group_page(
+        description=f"""<table>
+        <tr><td>DVD synopsis.</td></tr>
+        <tr><td><a href="{SCENE_URL}">Scene 1</a>Promotion 1</td></tr>
+        <tr><td><a href="{second_url}">Scene 2</a>Promotion 2</td></tr>
+        <tr><td><a href="{SCENE_URL}">Duplicate</a></td></tr></table>"""
+    )
+    return pages, second_url
+
+
+def test_movie_performer_union_deduplicates_profile_ids_in_first_seen_order():
+    pages, second_url = movie_pages()
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages[url]
+
+    result = colt.scrape("movie", GROUP_URL, fetch)
+    new_profile = colt.SITE + "/profile/999-new-credit"
+    assert calls == [
+        GROUP_URL,
+        SCENE_URL,
+        second_url,
+        HOT_COP_URL,
+        PROFILE_URL,
+        new_profile,
+    ]
+    assert [p["name"] for p in result["performers"]] == [
+        "Hot Cop",
+        "Seth Fornea",
+        "New Credit",
+    ]
+    assert all(p["height"] == "183" for p in result["performers"])
+    assert result["performers"][1]["urls"] == [PROFILE_URL]
+    assert result["details"] == "DVD synopsis."
+    assert result["groups"] == [colt.parse_group(pages[GROUP_URL], GROUP_URL)]
+
+
+@pytest.mark.parametrize("failed_kind", ["scene", "profile"])
+@pytest.mark.parametrize("parse_failure", [False, True])
+def test_movie_failed_secondary_lookup_keeps_result_and_continues(
+    failed_kind, parse_failure, capsys
+):
+    pages, second_url = movie_pages()
+    failed_url = SCENE_URL if failed_kind == "scene" else HOT_COP_URL
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if url == failed_url:
+            if parse_failure:
+                return html.fromstring("<html><h1>Access denied</h1></html>")
+            raise HTTPError(url, 429, "Too Many Requests", {}, None)
+        # The second scene uses a slug variant when the first scene fails.
+        if url == colt.SITE + "/profile/334-other-slug":
+            return pages[PROFILE_URL]
+        return pages[url]
+
+    result = colt.scrape("movie", GROUP_URL, fetch)
+    assert result["title"] == "Red Hot"
+    assert result["groups"][0]["name"] == "Red Hot"
+    assert second_url in calls
+    assert calls.count(failed_url) == 1
+    assert result["performers"][-1]["name"] == "New Credit"
+    assert result["performers"][-1]["height"] == "183"
+    if failed_kind == "profile":
+        assert result["performers"][0] == {"name": "Hot Cop", "urls": [HOT_COP_URL]}
+    else:
+        assert [p["name"] for p in result["performers"]] == ["Seth Alias", "New Credit"]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    label = "Scene" if failed_kind == "scene" else "Performer"
+    assert f"[Warning] {label} lookup failed for {failed_url}:" in captured.err
+
+
+def test_scene_links_validate_and_deduplicate_before_promotion_rows_are_removed():
+    malformed = SCENE_URL + "%E2%80%9C%20target="
+    description = html.fromstring(f"""<div>
+        <a href="{malformed}">Malformed</a>
+        <a href="http://coltstudiogroup.com/scene/395-red-hot-scene-1?x=1">First</a>
+        <a href="{SCENE_URL}">Duplicate</a>
+        <a href="https://example.com/scene/1">Foreign</a>
+        <a href="/products/red-hot">Product</a>
+        <a href="{PROFILE_URL}">Profile</a></div>""")
+    assert colt.scene_links(description, GROUP_URL) == [malformed]
+    assert colt.page_url(malformed, "scene") == malformed
+    assert colt.canonical(scene_page(), malformed, "scene") == SCENE_URL
+    pages = {
+        GROUP_URL: group_page(description=html.tostring(description).decode()),
+        SCENE_URL: scene_page(),
+        malformed: scene_page(),
+        HOT_COP_URL: profile_page(url=HOT_COP_URL, name="Hot Cop"),
+        PROFILE_URL: profile_page(),
+    }
+    result = colt.scrape("movie", GROUP_URL, pages.__getitem__)
+    assert [p["name"] for p in result["performers"]] == ["Hot Cop", "Seth Fornea"]
+
+
+@pytest.mark.parametrize("kind", sorted(colt.STORE_KINDS))
+def test_store_modes_share_url_validation_and_full_canonical_equality(kind):
+    assert (
+        colt.page_url("http://www.coltstudiostore.com/products/red-hot/?x=1", kind)
+        == GROUP_URL
+    )
+    assert colt.canonical(group_page(), GROUP_URL, kind) == GROUP_URL
+    # These handles share a prefix, unlike numeric scene/profile identifiers.
+    doc = group_page()
+    doc.xpath('//link[@rel="canonical"]')[0].set(
+        "href", colt.STORE + "/products/red-other"
+    )
+    with pytest.raises(ValueError, match="different item"):
+        colt.canonical(doc, GROUP_URL, kind)
+    for url in (SCENE_URL, colt.STORE + "/collections/dvd/products/red-hot"):
+        with pytest.raises(ValueError, match="DVD product URL"):
+            colt.page_url(url, kind)
+
+
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"type": "Calendar"}, "not a DVD"),
+        ({"handle": "other-product"}, "does not match"),
+    ],
+)
+def test_movie_rejects_invalid_products(changes, message):
+    with pytest.raises(ValueError, match=message):
+        colt.scrape("movie", GROUP_URL, lambda url: group_page(**changes))
+
+
+def test_movie_rejects_wrong_canonical_and_non_store_url():
+    doc = group_page()
+    doc.xpath('//link[@rel="canonical"]')[0].set(
+        "href", colt.STORE + "/products/red-other"
+    )
+    with pytest.raises(ValueError, match="different item"):
+        colt.scrape("movie", GROUP_URL, lambda url: doc)
+    with patch.object(colt, "fetch_page") as fetch:
+        with pytest.raises(ValueError, match="DVD product URL"):
+            colt.scrape("movie", SCENE_URL, fetch)
+    fetch.assert_not_called()
+
+
+def test_main_accepts_movie_and_returns_one_json_value(capsys):
+    expected = {"title": "Red Hot", "performers": []}
+    with (
+        patch.object(sys, "argv", ["coltstudio.py", "movie"]),
+        patch.object(sys, "stdin", io.StringIO(json.dumps({"url": GROUP_URL}))),
+        patch.object(colt, "scrape", return_value=expected) as scrape,
+    ):
+        assert colt.main() == 0
+    scrape.assert_called_once_with("movie", GROUP_URL)
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == expected
+    assert captured.err == ""
+
+
+def test_usage_error_includes_movie(capsys):
+    with patch.object(sys, "argv", ["coltstudio.py", "invalid"]):
+        assert colt.main() == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) is None
+    assert "movie" in captured.err
+
+
 def test_scene_performers_include_all_profile_fields_before_dvd_lookup():
     pages = scene_profile_pages(dvd=True)
     calls = []
@@ -758,6 +991,10 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(route["action"], "script")
             self.assertEqual(route["script"], ["python", "coltstudio.py", mode])
             self.assertTrue((ROOT / route["script"][1]).is_file())
+        movie = config["sceneByURL"][1]
+        self.assertEqual(movie["action"], "script")
+        self.assertEqual(movie["url"], ["coltstudiostore.com/products/"])
+        self.assertEqual(movie["script"], ["python", "coltstudio.py", "movie"])
 
     def test_bad_input_is_json_null_and_nonzero_exit(self):
         result = subprocess.run(

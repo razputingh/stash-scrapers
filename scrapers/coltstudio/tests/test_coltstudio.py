@@ -281,25 +281,69 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(colt.product_data(group_page())["handle"], "red-hot")
 
 
-class PerformerTests(unittest.TestCase):
-    def test_profile_fields_and_unit_conversions(self):
-        doc = html.fromstring(f"""<html><link rel="canonical" href="{PROFILE_URL}">
+def profile_page(suffix="", cut_label="Cut / Uncut"):
+    return html.fromstring(f"""<html><link rel="canonical" href="{PROFILE_URL}">
           <div class="modelProfileSidebar"><div class="profile">
           <img class="img-responsive" src="//static.coltstudiogroup.com/model.jpg">
           <div class="main_title"><h3>Seth Fornea</h3><p>A biography.</p>
           <p class="iconsCenter"><a href="/models/tag/111-colt-man">COLT Man</a></p></div>
-          <ul><li>Height <strong>6′ 00″</strong></li><li>Weight <strong>198 pounds</strong></li>
-          <li>Dick size <strong>8.50 inches</strong></li><li>Cut / Uncut <strong>Cut</strong></li>
-          <li>Position <strong>Top</strong></li><li>Age <strong>24</strong></li></ul>
+          <ul><li>Height{suffix} <strong>6′ 00″</strong></li><li>Weight{suffix} <strong>198 pounds</strong></li>
+          <li>Dick size{suffix} <strong>8.50 inches</strong></li><li>{cut_label}{suffix} <strong>Cut</strong></li>
+          <li>Position{suffix} <strong>Top</strong></li></ul>
           </div></div></html>""")
-        result = colt.parse_performer(doc, PROFILE_URL)
-        self.assertEqual(result["name"], "Seth Fornea")
-        self.assertEqual(result["height"], "183")
-        self.assertEqual(result["weight"], "90")
-        self.assertEqual(result["penis_length"], "21.59")
-        self.assertEqual(result["circumcised"], "CUT")
-        self.assertNotIn("birthdate", result)
-        self.assertEqual(result["tags"], [{"name": "COLT Man"}, {"name": "Top"}])
+
+
+class PerformerTests(unittest.TestCase):
+    def test_profile_fields_and_unit_conversions(self):
+        expected = colt.parse_performer(profile_page(), PROFILE_URL)
+        for suffix in ("", ":", " :", "  :  "):
+            with self.subTest(suffix=suffix):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    result = colt.parse_performer(profile_page(suffix), PROFILE_URL)
+                self.assertEqual(result, expected)
+                self.assertEqual(result["name"], "Seth Fornea")
+                self.assertEqual(result["height"], "183")
+                self.assertEqual(result["weight"], "90")
+                self.assertEqual(result["penis_length"], "21.59")
+                self.assertEqual(result["circumcised"], "CUT")
+                self.assertNotIn("birthdate", result)
+                self.assertEqual(
+                    result["tags"], [{"name": "COLT Man"}, {"name": "Top"}]
+                )
+                self.assertEqual(stderr.getvalue(), "")
+
+    def test_cut_label_variants(self):
+        for label in ("Cut / Uncut", "Cut/Uncut", "Cut", "  CUT /   UNCUT  "):
+            with self.subTest(label=label):
+                result = colt.parse_performer(
+                    profile_page(suffix=" :", cut_label=label), PROFILE_URL
+                )
+                self.assertEqual(result["circumcised"], "CUT")
+
+    def test_unrecognized_labels_warn_on_stderr(self):
+        for label, value in (
+            ("Circumcised", "Cut"),
+            ("Haircut", "Cut"),
+            ("Age", "24"),
+            ("Sign", "Gemini"),
+        ):
+            with self.subTest(label=label):
+                doc = profile_page(cut_label=label)
+                doc.xpath(colt.SIDEBAR + "//li/strong")[3].text = value
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    result = colt.parse_performer(doc, PROFILE_URL)
+                self.assertNotIn("circumcised", result)
+                self.assertNotIn("birthdate", result)
+                self.assertEqual(result["height"], "183")
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn("[Warning]", stderr.getvalue())
+                self.assertIn(label.casefold(), stderr.getvalue())
 
 
 class InterfaceTests(unittest.TestCase):

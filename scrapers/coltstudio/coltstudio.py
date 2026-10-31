@@ -402,7 +402,7 @@ def parse_performer(doc, url):
         }:
             result["urls"].append(absolute)
     for item in doc.xpath(SIDEBAR + "//li[strong]"):
-        label = clean(item.text or "").casefold()
+        label = clean(item.text or "").casefold().rstrip(":").strip()
         value = first(item, "./strong")
         if label == "height":
             match = re.fullmatch(r"(\d+)\s*[′'’]\s*(\d+)\s*[″\"”]?", value)
@@ -418,12 +418,17 @@ def parse_performer(doc, url):
             match = re.fullmatch(r"([\d.]+)\s*inches", value, re.IGNORECASE)
             if match:
                 result["penis_length"] = str(round(float(match[1]) * 2.54, 2))
-        elif "cut" in label:
+        elif label in {"cut / uncut", "cut/uncut", "cut"}:
             cut = {"cut": "CUT", "uncut": "UNCUT"}.get(value.casefold())
             if cut:
                 result["circumcised"] = cut
         elif label == "position":
             result["tags"] = tags([t["name"] for t in result["tags"]] + [value])
+        else:
+            print(
+                f"[Warning] Unrecognized performer label: {label!r}",
+                file=sys.stderr,
+            )
     return result
 
 

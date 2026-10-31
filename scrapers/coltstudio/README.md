@@ -106,6 +106,10 @@ Tests use synthetic HTML fixtures based on the public page structure. They make 
 
 Live checks on October 30, 2026 returned the main scene photo at 1280×720 and the social thumbnail at 640×360.
 The same check returned the linked Red Hot DVD with director Kristofer Weston, a 41-minute runtime, and its front cover.
+The public Seth Fornea profile used `Height`, `Weight`, `Dick size`, `Cut / Uncut`, and `Position` without colons, matching the fixture.
+The performer check returned 183 cm, 90 kg, 21.59 cm penis length, `CUT`, and a `Top` tag.
+Tests also cover labels with colons and extra spaces.
+Unrecognized performer labels produce warnings on standard error, including the live profile's unsupported `Age` and `Sign` fields.
 Local results contain image URLs. Stash downloads the images during scrape post-processing.
 
 ## References

@@ -239,6 +239,43 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(result["studio"]["name"], "Buckshot")
         self.assertNotIn("scene_index", result["groups"][0])
 
+    def test_null_dvd_type_does_not_lose_scene(self):
+        pages = {SCENE_URL: scene_page(), GROUP_URL: group_page(type=None)}
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
+        self.assertEqual(result, colt.parse_scene(pages[SCENE_URL], SCENE_URL))
+        self.assertIn(f"[Warning] DVD lookup failed for {GROUP_URL}", stderr.getvalue())
+        self.assertIn("not a DVD", stderr.getvalue())
+
+    def test_dvd_parse_errors_do_not_stop_later_lookups(self):
+        second_url = colt.STORE + "/products/second-dvd"
+        doc = scene_page()
+        doc.xpath(colt.DETAILS)[0].append(
+            html.fromstring(f'<a href="{second_url}">Another DVD</a>')
+        )
+        pages = {
+            SCENE_URL: doc,
+            GROUP_URL: group_page(),
+            second_url: group_page(handle="second-dvd"),
+        }
+        pages[second_url].xpath('//link[@rel="canonical"]')[0].set("href", second_url)
+        group = colt.parse_group(pages[second_url], second_url)
+        for error in (TypeError("Unexpected type"), AttributeError("Unexpected shape")):
+            with self.subTest(error=type(error).__name__):
+                stderr = io.StringIO()
+                with (
+                    patch.object(colt, "parse_group", side_effect=[error, group]),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
+                self.assertEqual(result["title"], "RED HOT Scene 1")
+                self.assertEqual(result["groups"], [group])
+                self.assertIn(
+                    f"[Warning] DVD lookup failed for {GROUP_URL}: {error}",
+                    stderr.getvalue(),
+                )
+
     def test_scene_without_dvd_needs_one_request(self):
         calls = []
 
@@ -317,6 +354,31 @@ class GroupTests(unittest.TestCase):
             colt.parse_group(group_page(), GROUP_URL)["tags"],
             [{"name": "Muscle"}, {"name": "Vintage"}],
         )
+
+    def test_non_dict_variants_are_skipped(self):
+        result = colt.parse_group(
+            group_page(
+                variants=[
+                    None,
+                    "invalid",
+                    123,
+                    [],
+                    {"sku": "MAN-001D"},
+                    {},
+                    {"sku": "MAN-002D"},
+                    {"sku": "MAN-001D"},
+                ]
+            ),
+            GROUP_URL,
+        )
+        self.assertTrue(result["synopsis"].endswith("DVD SKU: MAN-001D, MAN-002D"))
+
+    def test_null_images_and_tags_are_empty(self):
+        result = colt.parse_group(group_page(images=None, tags=None), GROUP_URL)
+        self.assertEqual(result["name"], "Red Hot")
+        self.assertNotIn("front_image", result)
+        self.assertNotIn("back_image", result)
+        self.assertNotIn("tags", result)
 
     def test_substudio_tag_overrides_umbrella_vendor(self):
         self.assertEqual(

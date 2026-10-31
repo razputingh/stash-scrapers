@@ -296,7 +296,7 @@ def parse_group(doc, url):
     product = product_data(doc)
     if product.get("handle") != url.rsplit("/", 1)[-1]:
         raise ValueError("Embedded DVD product does not match the requested URL")
-    if not re.search(r"\bdvd\b", product.get("type", ""), re.IGNORECASE):
+    if not re.search(r"\bdvd\b", product.get("type") or "", re.IGNORECASE):
         raise ValueError("The Colt Store product is not a DVD")
     description = html.fromstring(
         "<div>" + (product.get("description") or "") + "</div>"
@@ -317,7 +317,11 @@ def parse_group(doc, url):
     )
     result = {"name": clean(product["title"]), "urls": [url], "studio": studio(name)}
     synopsis = paragraphs([description])
-    skus = unique(clean(v.get("sku", "")) for v in product.get("variants", []))
+    skus = unique(
+        clean(v.get("sku", ""))
+        for v in product.get("variants", [])
+        if isinstance(v, dict)
+    )
     if skus:
         synopsis += "\n\nDVD SKU: " + ", ".join(skus)
     if synopsis:
@@ -358,7 +362,7 @@ def parse_group(doc, url):
         content_tags.extend(clean(v) for v in value.split(","))
     if content_tags:
         result["tags"] = tags(content_tags)
-    images = unique(artwork_url(v, url) for v in product.get("images", []))
+    images = unique(artwork_url(v, url) for v in (product.get("images") or []))
     for key, marker in (
         ("front_image", r"(?:^|[_\- ])(?:f|front)(?:[_\-. ]|$)"),
         ("back_image", r"(?:^|[_\- ])(?:b|back)(?:[_\-. ]|$)"),
@@ -462,7 +466,15 @@ def scrape(kind, url, fetch=fetch_page):
     for link in dvd_links(doc, url):
         try:
             group = parse_group(fetch(link), link)
-        except (HTTPError, URLError, ValueError, OSError, etree.LxmlError) as error:
+        except (
+            HTTPError,
+            URLError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            OSError,
+            etree.LxmlError,
+        ) as error:
             print(f"[Warning] DVD lookup failed for {link}: {error}", file=sys.stderr)
             continue
         groups.append(group)

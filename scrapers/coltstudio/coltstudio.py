@@ -12,7 +12,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from lxml import etree, html
+try:
+    from lxml import etree, html
+except ModuleNotFoundError:
+    print(
+        "[Error] Colt Studio scrape failed: the Python module lxml is not installed "
+        "for the Python that runs Stash. Install lxml>=5,<7 there.",
+        file=sys.stderr,
+    )
+    print("null")
+    sys.exit(1)
 
 SITE = "https://www.coltstudiogroup.com"
 STORE = "https://coltstudiostore.com"

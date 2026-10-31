@@ -11,7 +11,6 @@ groupByURL:
   - action: script
     url:
       - coltstudiostore.com/products/
-      - coltstudiostore.com/collections/
     script:
       - python
       - coltstudio.py

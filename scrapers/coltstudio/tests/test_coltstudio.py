@@ -347,6 +347,23 @@ class InterfaceTests(unittest.TestCase):
         self.assertIsNone(json.loads(result.stdout))
         self.assertIn("[Error]", result.stderr)
 
+    def test_missing_lxml_is_json_null_and_nonzero_exit(self):
+        # A None entry in sys.modules makes `import lxml` raise ModuleNotFoundError.
+        code = (
+            "import runpy, sys; sys.modules['lxml'] = None; "
+            f"runpy.run_path({str(ROOT / 'coltstudio.py')!r}, run_name='__main__')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            check=False,
+            input="{}",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(json.loads(result.stdout))
+        self.assertIn("lxml", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

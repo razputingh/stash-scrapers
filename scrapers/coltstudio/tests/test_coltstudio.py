@@ -558,10 +558,12 @@ class InterfaceTests(unittest.TestCase):
         self.assertIsNone(json.loads(result.stdout))
         self.assertIn("[Error]", result.stderr)
 
-    def test_missing_lxml_is_json_null_and_nonzero_exit(self):
-        # A None entry in sys.modules makes `import lxml` raise ModuleNotFoundError.
+    def test_failed_lxml_install_is_json_null_and_nonzero_exit(self):
+        # Block imports and fake pip failure so the test stays offline.
         code = (
-            "import runpy, sys; sys.modules['lxml'] = None; "
+            "import runpy, sys, subprocess; from unittest.mock import patch; "
+            "sys.modules['lxml'] = None; "
+            "patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'pip')).start(); "
             f"runpy.run_path({str(ROOT / 'coltstudio.py')!r}, run_name='__main__')"
         )
         result = subprocess.run(
@@ -574,6 +576,7 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIsNone(json.loads(result.stdout))
         self.assertIn("lxml", result.stderr)
+        self.assertIn("-m pip install --target", result.stderr)
 
 
 if __name__ == "__main__":

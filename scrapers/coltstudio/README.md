@@ -6,19 +6,22 @@ It makes no changes to your Stash library. You review and apply scrape results i
 
 ## Installation
 
-Stash must have Python 3.10 or later and `lxml` available to its Python executable.
+Stash must have Python 3.10 or later with `pip` available to its Python executable.
 These requirements apply inside the Stash container, not only on your computer.
 This scraper targets Stash v0.31.1.
 
-1. Find the scraper directory in Stash under Settings → Metadata Providers → Scrapers.
-2. Create a `coltstudio` folder inside that directory.
-3. Copy `ColtStudio.yml` and `coltstudio.py` into that folder.
-4. Install `lxml>=5,<7` in the Python environment that Stash uses, if it is not already available.
-5. Reload the scrapers in Stash.
+1. Open Settings → Metadata Providers → Available Scrapers → Add Source.
+2. Enter <https://razputingh.github.io/stash-scrapers/index.yml> and choose any source name and local path.
+3. Install *Colt Studio*. Stash installs `scraper_deps` through the package dependency list.
 
 Stash runs `python coltstudio.py` from the scraper folder.
-The inline dependency declaration supports local `uv run` use. Stash itself does not install these dependencies.
-For containers, retain the dependency in your container setup so that it survives a rebuild.
+On the first scrape, `scraper_deps` installs `lxml>=5,<7` automatically if `lxml` is not importable.
+This needs network access and a writable scraper source directory.
+Dependencies live in `automatic_dependencies/` beside the installed package folders and are shared across the source.
+Already importable modules are used without a version check.
+If installation fails, the error names the package and the pip command to run with Stash's Python.
+The inline dependency declaration also supports local `uv run` use.
+For containers, retain the scraper source directory across rebuilds to avoid reinstalling dependencies.
 
 AdultSiteRunner also handles Colt scene and performer URLs.
 Select Colt Studio explicitly when Stash offers a scraper choice.

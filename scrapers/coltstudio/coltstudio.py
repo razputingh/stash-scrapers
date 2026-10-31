@@ -8,20 +8,22 @@ import json
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scraper_deps import ensure_requirements
+
 try:
-    from lxml import etree, html
-except ModuleNotFoundError:
-    print(
-        "[Error] Colt Studio scrape failed: the Python module lxml is not installed "
-        "for the Python that runs Stash. Install lxml>=5,<7 there.",
-        file=sys.stderr,
-    )
+    ensure_requirements("lxml>=5,<7")
+except SystemExit as exc:
+    print(exc, file=sys.stderr)
     print("null")
     sys.exit(1)
+
+from lxml import etree, html
 
 SITE = "https://www.coltstudiogroup.com"
 STORE = "https://coltstudiostore.com"

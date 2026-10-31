@@ -1,6 +1,5 @@
 # macOS
 .DS_Store
-<<<<<<< Updated upstream
 
 # python
 # Byte-compiled / optimized / DLL files
@@ -226,8 +225,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-=======
 .venv/
 __pycache__/
 .ruff_cache/
->>>>>>> Stashed changes
+_site/
+automatic_dependencies/

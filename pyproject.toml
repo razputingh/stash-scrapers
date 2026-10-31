@@ -6,7 +6,13 @@ requires-python = ">=3.10"
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "pyyaml>=6,<7", "lxml>=5,<7", "pillow>=11,<13"]
+dev = [
+    "pytest>=8,<10",
+    "pyyaml>=6,<7",
+    "lxml>=5,<7",
+    "pillow>=11,<13",
+    "types-lxml>=2026.2.16",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "scrapers/coltstudio/tests"]

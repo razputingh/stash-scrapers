@@ -47,6 +47,15 @@ DETAILS = (
     '//div[contains(concat(" ", normalize-space(@class), " "), " container_styled_1 ")]'
 )
 SIDEBAR = '//div[contains(concat(" ", normalize-space(@class), " "), " modelProfileSidebar ")]'
+FETCH_ERRORS = (
+    HTTPError,
+    URLError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    OSError,
+    etree.LxmlError,
+)
 
 
 def clean(value):
@@ -200,7 +209,10 @@ def parse_scene(doc, url):
 def _parse_scene(doc, url):
     """Keep studio-label provenance separate from the public scene metadata."""
     url = canonical(doc, url, "scene")
-    code = re.search(r"/scene/(\d+)", url)[1]
+    match = re.search(r"/scene/(\d+)", url)
+    if match is None:
+        raise ValueError("Scene ID missing from Colt scene URL")
+    code = match[1]
     title = first(doc, '//h2[contains(@class,"sectionMainTitle")]')
     if not title:
         raise ValueError("Scene title missing. Colt returned an unexpected page")
@@ -215,18 +227,16 @@ def _parse_scene(doc, url):
     result["tags"] = tags(
         text(n) for n in doc.xpath(DETAILS + '//h5[contains(.,"Categories")]/a')
     )
-    performers = []
+    performers = {}
     for anchor in doc.xpath(DETAILS + '//span[contains(@class,"perfImage")]/a'):
         name = text(anchor)
         href = anchor.get("href", "")
         if name and href:
-            performer = {
-                "name": name,
-                "urls": [page_url(urljoin(url, href), "performer")],
-            }
-            if performer not in performers:
-                performers.append(performer)
-    result["performers"] = performers
+            performer_url = page_url(urljoin(url, href), "performer")
+            # Key on the numeric profile ID so alias text or slug variants do not duplicate.
+            profile_id = re.search(r"/profile/(\d+)", performer_url)[1]
+            performers.setdefault(profile_id, {"name": name, "urls": [performer_url]})
+    result["performers"] = list(performers.values())
     # Never search the related-scenes section. Require this scene's ID in the filename.
     own_photo = f"/scn_{code}_"
     images = doc.xpath(
@@ -469,6 +479,19 @@ def parse_performer(doc, url):
     return result
 
 
+def performer_details(entry, fetch):
+    """Add profile fields without changing the scene credit used for matching."""
+    url = entry["urls"][0]
+    try:
+        result = parse_performer(fetch(url), url)
+    except FETCH_ERRORS as error:
+        print(f"[Warning] Performer lookup failed for {url}: {error}", file=sys.stderr)
+        return entry
+    result["name"] = entry["name"]
+    result["urls"] = unique(entry["urls"] + result["urls"])
+    return result
+
+
 def scrape(kind, url, fetch=fetch_page):
     url = page_url(url, kind)
     doc = fetch(url)
@@ -477,19 +500,14 @@ def scrape(kind, url, fetch=fetch_page):
     if kind == "performer":
         return parse_performer(doc, url)
     result, explicit_studio = _parse_scene(doc, url)
+    result["performers"] = [
+        performer_details(entry, fetch) for entry in result["performers"]
+    ]
     groups = []
     for link in dvd_links(doc, url):
         try:
             group = parse_group(fetch(link), link)
-        except (
-            HTTPError,
-            URLError,
-            ValueError,
-            TypeError,
-            AttributeError,
-            OSError,
-            etree.LxmlError,
-        ) as error:
+        except FETCH_ERRORS as error:
             print(f"[Warning] DVD lookup failed for {link}: {error}", file=sys.stderr)
             continue
         groups.append(group)

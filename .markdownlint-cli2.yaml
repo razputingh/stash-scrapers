@@ -1,0 +1,6 @@
+config:
+  # Prose uses one sentence per line, so line length is not limited.
+  MD013: false
+ignores:
+  - "**/node_modules/**"
+  - "**/.venv/**"

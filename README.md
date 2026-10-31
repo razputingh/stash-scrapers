@@ -28,3 +28,6 @@ The build writes `index.yml` and one zip per package into `_site/`.
 Package versions and dates come from the last git commit for each package directory.
 Commit new package directories before building them.
 Pushes to `main` test the code and publish the source through GitHub Pages.
+
+Stash's install UI selects dependencies from `requires` automatically.
+API clients must resolve that list and include the required packages in the `installPackages` request.

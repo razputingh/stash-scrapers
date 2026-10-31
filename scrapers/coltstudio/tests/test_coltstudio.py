@@ -8,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 
 import yaml
@@ -80,7 +81,83 @@ def group_page(**changes):
       window.unrelated = true;</script><div>Recommended products</div></body></html>""")
 
 
+class LabelTests(unittest.TestCase):
+    def test_lines_preserve_node_order_and_paragraph_boundaries(self):
+        doc = html.fromstring("""<div>
+          <h5>Brand: Olympus</h5>
+          <table><tr><td>Studio: Buckshot<br>Director: First Director
+          <p>Released: 2004-05-06</p></td></tr></table>
+          <ul><li>Label: Minute Man</li></ul>
+          <p>Director: Second Director</p></div>""")
+        lines = colt.label_lines(doc)
+        self.assertEqual(
+            lines,
+            [
+                "Brand: Olympus",
+                "Studio: Buckshot",
+                "",
+                "Director: First Director",
+                "",
+                "Released: 2004-05-06",
+                "Released: 2004-05-06",
+                "Label: Minute Man",
+                "Director: Second Director",
+            ],
+        )
+        self.assertEqual(colt.labeled_value(lines, "Studio|Label|Brand"), "Olympus")
+        self.assertEqual(
+            colt.labeled_value(lines, "Director|Directed by"), "First Director"
+        )
+        self.assertEqual(
+            colt.labeled_value(lines, "Release Date|Released|Date"), "2004-05-06"
+        )
+
+    def test_only_explicit_labels_in_supported_nodes_match(self):
+        doc = html.fromstring("""<div>
+          <div>Studio: Buckshot</div><h2>Director: Wrong Director</h2>
+          <p>Prose about Studio: Buckshot<script>Director: Script</script>
+          <style>Director: Style</style></p>
+          <p>  dIrEcTeD by : <em>Jane Director</em><br>Date: 2004</p>
+          <li>Studio:</li></div>""")
+        lines = colt.label_lines(doc)
+        self.assertEqual(colt.labeled_value(lines, "Studio|Label|Brand"), "")
+        self.assertEqual(
+            colt.labeled_value(lines, "Director|Directed by"), "Jane Director"
+        )
+        self.assertEqual(
+            colt.labeled_value(lines, "Release Date|Released|Date"), "2004"
+        )
+
+
 class SceneTests(unittest.TestCase):
+    def test_scrape_extracts_label_lines_and_studio_only_once(self):
+        doc = scene_page(dvd=False, extras="<h5>Studio: Olympus</h5>")
+        with (
+            patch.object(colt, "label_lines", wraps=colt.label_lines) as extract,
+            patch.object(colt, "labeled_value", wraps=colt.labeled_value) as lookup,
+        ):
+            result = colt.scrape("scene", SCENE_URL, lambda url: doc)
+        extract.assert_called_once_with(doc)
+        self.assertEqual(
+            [call.args[1] for call in lookup.call_args_list],
+            [
+                "Studio|Label|Brand",
+                "Release Date|Released|Date",
+                "Director|Directed by",
+            ],
+        )
+        self.assertEqual(result, colt.parse_scene(doc, SCENE_URL))
+
+    def test_label_lines_are_not_stale_between_parses(self):
+        doc = scene_page(extras="<h5>Studio: Olympus</h5>")
+        self.assertEqual(colt.parse_scene(doc, SCENE_URL)["studio"]["name"], "Olympus")
+        doc.xpath('//h5[starts-with(.,"Studio:")]')[0].text = "Studio: Buckshot"
+        self.assertEqual(colt.parse_scene(doc, SCENE_URL)["studio"]["name"], "Buckshot")
+        self.assertEqual(
+            colt.parse_scene(scene_page(), SCENE_URL)["studio"]["name"],
+            "Colt Studio Group",
+        )
+
     def test_main_image_not_social_thumbnail(self):
         result = colt.parse_scene(scene_page(), SCENE_URL)
         self.assertEqual(result["image"], PHOTO)
@@ -182,6 +259,16 @@ class SceneTests(unittest.TestCase):
                 result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
                 self.assertEqual(result["studio"]["name"], name)
 
+    def test_unknown_or_empty_scene_label_still_allows_dvd_fallback(self):
+        for label in ("Unknown studio", ""):
+            with self.subTest(label=label):
+                pages = {
+                    SCENE_URL: scene_page(extras=f"<h5>Studio: {label}</h5>"),
+                    GROUP_URL: group_page(tags=["Buckshot"]),
+                }
+                result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
+                self.assertEqual(result["studio"]["name"], "Buckshot")
+
     def test_wrong_canonical_is_rejected(self):
         doc = scene_page()
         doc.xpath('//link[@rel="canonical"]')[0].set(
@@ -192,6 +279,17 @@ class SceneTests(unittest.TestCase):
 
 
 class GroupTests(unittest.TestCase):
+    def test_description_label_lines_are_extracted_once(self):
+        doc = group_page(
+            description="""<p>Brand: Olympus</p>
+            <p>Release Date: 2004-05-06</p>"""
+        )
+        with patch.object(colt, "label_lines", wraps=colt.label_lines) as extract:
+            result = colt.parse_group(doc, GROUP_URL)
+        extract.assert_called_once()
+        self.assertEqual(result["studio"]["name"], "Olympus")
+        self.assertEqual(result["date"], "2004-05-06")
+
     def test_table_cell_synopsis_without_paragraph_wrapper(self):
         doc = group_page(
             description="""<table><tr><td>Compilation synopsis.<br><br>

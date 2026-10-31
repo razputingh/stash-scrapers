@@ -139,13 +139,21 @@ def explicit_date(value):
     return ""
 
 
-def labeled_value(doc, label):
+def label_lines(doc):
+    """Extract label candidates once, preserving node and line order."""
+    return [
+        line
+        for node in doc.xpath(".//li | .//p | .//h5 | .//tr")
+        for line in paragraphs([node]).splitlines()
+    ]
+
+
+def labeled_value(lines, label):
     """Read explicit labels, not words in marketing prose or scene titles."""
-    for node in doc.xpath(".//li | .//p | .//h5 | .//tr"):
-        for line in paragraphs([node]).splitlines():
-            match = re.match(rf"^\s*(?:{label})\s*:\s*(.+)$", line, re.IGNORECASE)
-            if match:
-                return match[1]
+    for line in lines:
+        match = re.match(rf"^\s*(?:{label})\s*:\s*(.+)$", line, re.IGNORECASE)
+        if match:
+            return match[1]
     return ""
 
 
@@ -183,13 +191,22 @@ def paragraphs(nodes):
 
 
 def parse_scene(doc, url):
+    result, _ = _parse_scene(doc, url)
+    return result
+
+
+def _parse_scene(doc, url):
+    """Keep studio-label provenance separate from the public scene metadata."""
     url = canonical(doc, url, "scene")
     code = re.search(r"/scene/(\d+)", url)[1]
     title = first(doc, '//h2[contains(@class,"sectionMainTitle")]')
     if not title:
         raise ValueError("Scene title missing. Colt returned an unexpected page")
+    lines = label_lines(doc)
+    label = labeled_value(lines, "Studio|Label|Brand")
+    explicit_studio = clean(label).casefold() in STUDIOS
     result = {"title": title, "code": code, "urls": [url]}
-    result["studio"] = studio(studio_name(labeled_value(doc, "Studio|Label|Brand")))
+    result["studio"] = studio(studio_name(label))
     result["details"] = paragraphs(
         doc.xpath(DETAILS + '//div[contains(@class,"p-5")]/p')
     )
@@ -220,7 +237,7 @@ def parse_scene(doc, url):
             image = ""
     if image:
         result["image"] = urljoin(url, image)
-    date = explicit_date(labeled_value(doc, "Release Date|Released|Date"))
+    date = explicit_date(labeled_value(lines, "Release Date|Released|Date"))
     if not date:
         details = first(
             doc, DETAILS + '//h5[starts-with(normalize-space(.),"Details:")]'
@@ -229,10 +246,10 @@ def parse_scene(doc, url):
         date = explicit_date(match[1]) if match else ""
     if date:
         result["date"] = date
-    director = labeled_value(doc, "Director|Directed by")
+    director = labeled_value(lines, "Director|Directed by")
     if director:
         result["director"] = director
-    return result
+    return result, explicit_studio
 
 
 def dvd_links(doc, url):
@@ -292,8 +309,9 @@ def parse_group(doc, url):
     raw_tags = product.get("tags") or []
     if isinstance(raw_tags, str):
         raw_tags = raw_tags.split(",")
+    lines = label_lines(description)
     name = studio_name(
-        labeled_value(description, "Studio|Label|Brand"),
+        labeled_value(lines, "Studio|Label|Brand"),
         product.get("vendor", ""),
         *raw_tags,
     )
@@ -316,7 +334,7 @@ def parse_group(doc, url):
     )
     if runtime:
         result["duration"] = str(int(runtime[1]) * 60)
-    date = explicit_date(labeled_value(description, "Release Date|Released|Date"))
+    date = explicit_date(labeled_value(lines, "Release Date|Released|Date"))
     if date:
         result["date"] = date
     # Exclude merchandising, inventory, and brand labels from product tags.
@@ -439,10 +457,7 @@ def scrape(kind, url, fetch=fetch_page):
         return parse_group(doc, url)
     if kind == "performer":
         return parse_performer(doc, url)
-    result = parse_scene(doc, url)
-    explicit_studio = (
-        clean(labeled_value(doc, "Studio|Label|Brand")).casefold() in STUDIOS
-    )
+    result, explicit_studio = _parse_scene(doc, url)
     groups = []
     for link in dvd_links(doc, url):
         try:

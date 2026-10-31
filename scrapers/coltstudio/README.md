@@ -52,6 +52,14 @@ The scraper requires the current scene ID in the image filename and excludes the
 If the main image is absent, it uses the current scene's social thumbnail.
 It returns explicit full release dates and directors when the scene page provides them.
 
+Scene performers also include the profile fields described below.
+The scraper makes one extra request per distinct performer in each scene, before the DVD lookups.
+These requests run one at a time, so scenes with more performers take longer.
+The scene credit remains the performer's name, even when the profile heading differs.
+Profile URLs and social links are combined without duplicates, with the scene's profile URL first.
+If a profile request or parse fails, the scraper logs a warning and keeps the performer's name and profile URL.
+It keeps the scene and continues with the other performers and DVDs.
+
 Each direct DVD product link in the scene details produces a related group result.
 The scraper follows only these links. It does not guess DVD matches from scene titles.
 If the store request fails or the DVD is unavailable, it logs a warning and keeps the scene result.
@@ -93,7 +101,7 @@ Scrape the DVD URL in the group editor to retrieve its artwork directly.
 From this folder, run the offline tests:
 
 ```sh
-uv run --group dev python -m unittest discover -s tests -v
+uv run --group dev pytest tests
 ```
 
 To scrape a public scene without contacting your Stash server:

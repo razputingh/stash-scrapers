@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+import pytest
 import yaml
 from lxml import html
 
@@ -22,12 +23,13 @@ spec.loader.exec_module(colt)
 SCENE_URL = colt.SITE + "/scene/395-red-hot-scene-1"
 GROUP_URL = colt.STORE + "/products/red-hot"
 PROFILE_URL = colt.SITE + "/profile/334-seth-fornea"
+HOT_COP_URL = colt.SITE + "/profile/423-hot-cop"
 PHOTO = "https://static.coltstudiogroup.com/_thumbs/a/scn_395_full.jpg"
 THUMB = "https://static.coltstudiogroup.com/_thumbs/b/scn_395_small.jpg"
 
 
-def scene_page(photo=True, dvd=True, extras=""):
-    return html.fromstring(f"""<html><head>
+def scene_page(photo=True, dvd=True, extras="", performers=True):
+    doc = html.fromstring(f"""<html><head>
       <link rel="canonical" href="{SCENE_URL}">
       <meta property="og:image" content="{THUMB}"></head><body>
       <h2 class="main_title sectionMainTitle">RED HOT Scene 1</h2>
@@ -46,6 +48,10 @@ def scene_page(photo=True, dvd=True, extras=""):
       <div class="related"><h2>Wrong title</h2><img src="/scn_999_wrong.jpg">
         <a href="/profile/999-wrong">Wrong performer</a><p>Wrong details</p></div>
       </body></html>""")
+    if not performers:
+        for node in doc.xpath('//span[@class="perfImage"]'):
+            node.drop_tree()
+    return doc
 
 
 def group_page(**changes):
@@ -131,7 +137,7 @@ class LabelTests(unittest.TestCase):
 
 class SceneTests(unittest.TestCase):
     def test_scrape_extracts_label_lines_and_studio_only_once(self):
-        doc = scene_page(dvd=False, extras="<h5>Studio: Olympus</h5>")
+        doc = scene_page(dvd=False, extras="<h5>Studio: Olympus</h5>", performers=False)
         with (
             patch.object(colt, "label_lines", wraps=colt.label_lines) as extract,
             patch.object(colt, "labeled_value", wraps=colt.labeled_value) as lookup,
@@ -222,7 +228,7 @@ class SceneTests(unittest.TestCase):
     def test_broken_dvd_does_not_lose_scene(self):
         def fetch(url):
             if url == SCENE_URL:
-                return scene_page()
+                return scene_page(performers=False)
             raise HTTPError(url, 429, "Too Many Requests", {}, None)
 
         stderr = io.StringIO()
@@ -233,14 +239,20 @@ class SceneTests(unittest.TestCase):
         self.assertIn("429", stderr.getvalue())
 
     def test_scene_returns_linked_group(self):
-        pages = {SCENE_URL: scene_page(), GROUP_URL: group_page(tags=["Buckshot"])}
+        pages = {
+            SCENE_URL: scene_page(performers=False),
+            GROUP_URL: group_page(tags=["Buckshot"]),
+        }
         result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
         self.assertEqual(result["groups"][0]["name"], "Red Hot")
         self.assertEqual(result["studio"]["name"], "Buckshot")
         self.assertNotIn("scene_index", result["groups"][0])
 
     def test_null_dvd_type_does_not_lose_scene(self):
-        pages = {SCENE_URL: scene_page(), GROUP_URL: group_page(type=None)}
+        pages = {
+            SCENE_URL: scene_page(performers=False),
+            GROUP_URL: group_page(type=None),
+        }
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
@@ -250,7 +262,7 @@ class SceneTests(unittest.TestCase):
 
     def test_dvd_parse_errors_do_not_stop_later_lookups(self):
         second_url = colt.STORE + "/products/second-dvd"
-        doc = scene_page()
+        doc = scene_page(performers=False)
         doc.xpath(colt.DETAILS)[0].append(
             html.fromstring(f'<a href="{second_url}">Another DVD</a>')
         )
@@ -276,12 +288,12 @@ class SceneTests(unittest.TestCase):
                     stderr.getvalue(),
                 )
 
-    def test_scene_without_dvd_needs_one_request(self):
+    def test_scene_without_dvd_or_performers_needs_one_request(self):
         calls = []
 
         def fetch(url):
             calls.append(url)
-            return scene_page(dvd=False)
+            return scene_page(dvd=False, performers=False)
 
         self.assertNotIn("groups", colt.scrape("scene", SCENE_URL, fetch))
         self.assertEqual(calls, [SCENE_URL])
@@ -290,7 +302,9 @@ class SceneTests(unittest.TestCase):
         for name in ("Colt Studio Group", "Olympus"):
             with self.subTest(name=name):
                 pages = {
-                    SCENE_URL: scene_page(extras=f"<h5>Studio: {name}</h5>"),
+                    SCENE_URL: scene_page(
+                        extras=f"<h5>Studio: {name}</h5>", performers=False
+                    ),
                     GROUP_URL: group_page(tags=["Buckshot"]),
                 }
                 result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
@@ -300,7 +314,9 @@ class SceneTests(unittest.TestCase):
         for label in ("Unknown studio", ""):
             with self.subTest(label=label):
                 pages = {
-                    SCENE_URL: scene_page(extras=f"<h5>Studio: {label}</h5>"),
+                    SCENE_URL: scene_page(
+                        extras=f"<h5>Studio: {label}</h5>", performers=False
+                    ),
                     GROUP_URL: group_page(tags=["Buckshot"]),
                 }
                 result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
@@ -511,16 +527,143 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(colt.product_data(group_page())["handle"], "red-hot")
 
 
-def profile_page(suffix="", cut_label="Cut / Uncut"):
-    return html.fromstring(f"""<html><link rel="canonical" href="{PROFILE_URL}">
+def profile_page(
+    suffix="", cut_label="Cut / Uncut", url=PROFILE_URL, name="Seth Fornea"
+):
+    return html.fromstring(f"""<html><link rel="canonical" href="{url}">
           <div class="modelProfileSidebar"><div class="profile">
           <img class="img-responsive" src="//static.coltstudiogroup.com/model.jpg">
-          <div class="main_title"><h3>Seth Fornea</h3><p>A biography.</p>
+           <div class="main_title"><h3>{name}</h3><p>A biography.</p>
           <p class="iconsCenter"><a href="/models/tag/111-colt-man">COLT Man</a></p></div>
           <ul><li>Height{suffix} <strong>6′ 00″</strong></li><li>Weight{suffix} <strong>198 pounds</strong></li>
           <li>Dick size{suffix} <strong>8.50 inches</strong></li><li>{cut_label}{suffix} <strong>Cut</strong></li>
           <li>Position{suffix} <strong>Top</strong></li></ul>
-          </div></div></html>""")
+           </div></div></html>""")
+
+
+def scene_profile_pages(dvd=False, extras=""):
+    pages = {
+        SCENE_URL: scene_page(dvd=dvd, extras=extras),
+        HOT_COP_URL: profile_page(url=HOT_COP_URL, name="Hot Cop"),
+        PROFILE_URL: profile_page(),
+    }
+    if dvd:
+        pages[GROUP_URL] = group_page()
+    return pages
+
+
+def test_scene_performers_include_all_profile_fields_before_dvd_lookup():
+    pages = scene_profile_pages(dvd=True)
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages[url]
+
+    result = colt.scrape("scene", SCENE_URL, fetch)
+    assert calls == [SCENE_URL, HOT_COP_URL, PROFILE_URL, GROUP_URL]
+    assert result["groups"][0]["name"] == "Red Hot"
+    for performer, url in zip(result["performers"], [HOT_COP_URL, PROFILE_URL]):
+        assert performer == colt.parse_performer(pages[url], url)
+        assert performer["gender"] == "MALE"
+        assert performer["height"] == "183"
+        assert performer["weight"] == "90"
+        assert performer["penis_length"] == "21.59"
+        assert performer["circumcised"] == "CUT"
+        assert performer["details"] == "A biography."
+        assert performer["tags"] == [{"name": "COLT Man"}, {"name": "Top"}]
+        assert performer["images"] == ["https://static.coltstudiogroup.com/model.jpg"]
+
+
+@pytest.mark.parametrize("name", ["SETH FORNEA", "  Seth   Fornea  ", "Different Name"])
+def test_scene_credit_name_takes_precedence_over_profile_heading(name):
+    pages = scene_profile_pages()
+    pages[PROFILE_URL] = profile_page(name=name)
+    result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
+    assert result["performers"][1]["name"] == "Seth Fornea"
+    assert result["performers"][1]["height"] == "183"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        HTTPError(HOT_COP_URL, 429, "Too Many Requests", {}, None),
+        colt.URLError("Unavailable"),
+        TypeError("Unexpected type"),
+        AttributeError("Unexpected shape"),
+        OSError("Connection failed"),
+        colt.etree.LxmlError("Invalid document"),
+        None,
+    ],
+)
+def test_failed_profile_keeps_minimal_credit_and_continues(error, capsys):
+    pages = scene_profile_pages(dvd=True)
+    pages[HOT_COP_URL] = html.fromstring("<html><h1>Access denied</h1></html>")
+
+    def fetch(url):
+        if url == HOT_COP_URL and error is not None:
+            raise error
+        return pages[url]
+
+    result = colt.scrape("scene", SCENE_URL, fetch)
+    assert result["title"] == "RED HOT Scene 1"
+    assert result["performers"][0] == {"name": "Hot Cop", "urls": [HOT_COP_URL]}
+    assert result["performers"][1]["height"] == "183"
+    assert result["groups"][0]["name"] == "Red Hot"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"[Warning] Performer lookup failed for {HOT_COP_URL}:" in captured.err
+    message = str(error) if error is not None else "Performer name missing"
+    assert message in captured.err
+
+
+def test_duplicate_scene_credit_is_fetched_once():
+    pages = scene_profile_pages(
+        extras='<span class="perfImage"><a href="/profile/334-seth-fornea">Seth Fornea</a></span>'
+    )
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages[url]
+
+    result = colt.scrape("scene", SCENE_URL, fetch)
+    assert calls == [SCENE_URL, HOT_COP_URL, PROFILE_URL]
+    assert len(result["performers"]) == 2
+
+
+def test_same_profile_id_with_different_text_or_slug_is_one_performer():
+    pages = scene_profile_pages(
+        extras=(
+            '<span class="perfImage"><a href="/profile/334">Seth F.</a></span>'
+            '<span class="perfImage"><a href="/profile/334-other-slug">Seth</a></span>'
+        )
+    )
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages[url]
+
+    result = colt.scrape("scene", SCENE_URL, fetch)
+    assert [p["name"] for p in result["performers"]] == ["Hot Cop", "Seth Fornea"]
+    assert calls == [SCENE_URL, HOT_COP_URL, PROFILE_URL]
+
+
+@pytest.mark.parametrize("canonical_url", [PROFILE_URL, colt.SITE + "/profile/334"])
+def test_profile_urls_are_merged_uniquely_with_scene_url_first(canonical_url):
+    pages = scene_profile_pages()
+    doc = pages[PROFILE_URL]
+    doc.xpath('//link[@rel="canonical"]')[0].set("href", canonical_url)
+    social_url = "https://www.instagram.com/sethfornea/"
+    for _ in range(2):
+        doc.xpath(colt.SIDEBAR)[0].append(
+            html.fromstring(f'<a href="{social_url}">Instagram</a>')
+        )
+    result = colt.scrape("scene", SCENE_URL, pages.__getitem__)
+    assert result["performers"][1]["urls"] == list(
+        dict.fromkeys([PROFILE_URL, canonical_url, social_url])
+    )
 
 
 class PerformerTests(unittest.TestCase):

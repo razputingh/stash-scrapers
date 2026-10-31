@@ -6,4 +6,9 @@ requires-python = ">=3.10"
 dependencies = ["lxml>=5,<7"]
 
 [dependency-groups]
-dev = ["pyyaml>=6,<7", "pillow>=11,<13"]
+dev = [
+    "pyyaml>=6,<7",
+    "pillow>=11,<13",
+    "pytest>=8,<10",
+    "types-lxml>=2026.2.16",
+]

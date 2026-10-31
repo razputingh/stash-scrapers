@@ -8,6 +8,13 @@ sceneByURL:
       - python
       - coltstudio.py
       - scene
+  - action: script
+    url:
+      - coltstudiostore.com/products/
+    script:
+      - python
+      - coltstudio.py
+      - movie
 groupByURL:
   - action: script
     url:

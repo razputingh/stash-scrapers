@@ -29,9 +29,8 @@ A community scraper update can restore those entries. Do not disable AdultSiteRu
 
 Use a scene URL in the scene editor, a DVD URL in the group editor, or a profile URL in the performer editor.
 The scraper accepts HTTP and HTTPS, with or without `www`, and normalizes its output to HTTPS.
-Stash offers this scraper only for `coltstudiostore.com/products/` URLs.
-Collection-path URLs such as `/collections/dvd/products/title` do not match. Remove the `/collections/dvd` part of the address.
-The script itself accepts collection-path product URLs, so command-line use still works.
+Only `coltstudiostore.com/products/` URLs work.
+Collection-path URLs such as `/collections/dvd/products/title` do not. Remove the `/collections/dvd` part of the address.
 Collection listing pages do not work.
 
 Examples:

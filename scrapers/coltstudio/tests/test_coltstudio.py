@@ -306,11 +306,18 @@ class InterfaceTests(unittest.TestCase):
     def test_url_normalization(self):
         self.assertEqual(
             colt.page_url(
-                "http://www.coltstudiostore.com/collections/dvd/products/red-hot?variant=1",
+                "http://www.coltstudiostore.com/products/red-hot?variant=1",
                 "group",
             ),
             GROUP_URL,
         )
+
+    def test_collection_path_group_url_is_rejected(self):
+        with self.assertRaises(ValueError):
+            colt.page_url(
+                "https://coltstudiostore.com/collections/dvd/products/red-hot",
+                "group",
+            )
 
     def test_disallowed_urls(self):
         for url in [

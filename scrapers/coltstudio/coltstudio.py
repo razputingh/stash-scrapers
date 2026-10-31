@@ -88,10 +88,9 @@ def page_url(url, kind=None):
         if host != SITE or not re.fullmatch(rf"/{prefix}/\d+(?:-[^/]+)?", path):
             raise ValueError(f"Expected a Colt {prefix} URL")
     if kind == "group":
-        match = re.fullmatch(r"(?:/collections/[^/]+)?/products/([^/]+)", path)
+        match = re.fullmatch(r"/products/[^/]+", path)
         if host != STORE or not match:
             raise ValueError("Expected a Colt Store DVD product URL")
-        path = "/products/" + match[1]
     return host + path
 
 

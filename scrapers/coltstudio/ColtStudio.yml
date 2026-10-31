@@ -1,0 +1,26 @@
+name: Colt Studio
+sceneByURL:
+  - action: script
+    url:
+      - coltstudiogroup.com/scene/
+    script:
+      - python
+      - coltstudio.py
+      - scene
+groupByURL:
+  - action: script
+    url:
+      - coltstudiostore.com/products/
+      - coltstudiostore.com/collections/
+    script:
+      - python
+      - coltstudio.py
+      - group
+performerByURL:
+  - action: script
+    url:
+      - coltstudiogroup.com/profile/
+    script:
+      - python
+      - coltstudio.py
+      - performer

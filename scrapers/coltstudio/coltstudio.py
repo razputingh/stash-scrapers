@@ -493,6 +493,9 @@ def parse_performer(doc, url):
                 result["circumcised"] = cut
         elif label == "position":
             result["tags"] = tags([t["name"] for t in result["tags"]] + [value])
+        elif label in {"age", "sign"}:
+            # Known profile fields with no Stash equivalent; skip silently.
+            continue
         else:
             print(
                 f"[Warning] Unrecognized performer label: {label!r}",

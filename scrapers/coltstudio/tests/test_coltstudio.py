@@ -931,8 +931,6 @@ class PerformerTests(unittest.TestCase):
         for label, value in (
             ("Circumcised", "Cut"),
             ("Haircut", "Cut"),
-            ("Age", "24"),
-            ("Sign", "Gemini"),
         ):
             with self.subTest(label=label):
                 doc = profile_page(cut_label=label)
@@ -950,6 +948,18 @@ class PerformerTests(unittest.TestCase):
                 self.assertEqual(stdout.getvalue(), "")
                 self.assertIn("[Warning]", stderr.getvalue())
                 self.assertIn(label.casefold(), stderr.getvalue())
+
+    def test_age_and_sign_are_ignored_silently(self):
+        for label, value in (("Age", "24"), ("Sign", "Gemini")):
+            with self.subTest(label=label):
+                doc = profile_page(cut_label=label)
+                doc.xpath(colt.SIDEBAR + "//li/strong")[3].text = value
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    result = colt.parse_performer(doc, PROFILE_URL)
+                self.assertNotIn("circumcised", result)
+                self.assertEqual(result["height"], "183")
+                self.assertEqual(stderr.getvalue(), "")
 
 
 class InterfaceTests(unittest.TestCase):

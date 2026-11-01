@@ -143,7 +143,8 @@ The same check returned the linked Red Hot DVD with director Kristofer Weston, a
 The public Seth Fornea profile used `Height`, `Weight`, `Dick size`, `Cut / Uncut`, and `Position` without colons, matching the fixture.
 The performer check returned 183 cm, 90 kg, 21.59 cm penis length, `CUT`, and a `Top` tag.
 Tests also cover labels with colons and extra spaces.
-Unrecognized performer labels produce warnings on standard error, including the live profile's unsupported `Age` and `Sign` fields.
+The live profile's `Age` and `Sign` fields have no Stash equivalent, so the scraper skips them silently.
+Other unrecognized performer labels produce warnings on standard error.
 Local results contain image URLs. Stash downloads the images during scrape post-processing.
 
 A live whole-film check on October 31, 2026 returned Fresh Off The Vine with code `BSP-020D` and studio Buckshot.
